@@ -1,5 +1,4 @@
 import Matter from 'matter-js';
-import { FaceLandmarker, FilesetResolver } from "@mediapipe/tasks-vision";
 
 // --- Matter.js module aliases ---
 const { Engine, Render, Runner, World, Bodies, Composite, Composites, Constraint, Mouse, MouseConstraint } = Matter;
@@ -17,51 +16,24 @@ let runner;
 let mouseConstraint;
 let hairComposite;
 
-// --- MediaPipe setup ---
-let faceLandmarker;
+function getScalpPoints() {
+    const containerRect = characterContainer.getBoundingClientRect();
+    const scalpPoints = [];
 
-// Scalp landmark indices from MediaPipe FaceLandmarker
-const SCALP_LANDMARK_INDICES = [103, 67, 109, 10, 338, 297, 332, 284, 293, 296];
+    // Define the scalp area based on percentages of the container, so it scales
+    const scalpTop = containerRect.height * 0.2; // 20% from the top
+    const scalpWidth = containerRect.width * 0.5; // 50% of the width
+    const startX = (containerRect.width - scalpWidth) / 2;
+    const endX = startX + scalpWidth;
+    const numStrands = 15;
+    const strandSpacing = scalpWidth / (numStrands - 1);
 
-async function detectScalp() {
-    // Wait for the image to be fully loaded and have dimensions
-    if (!humanImage.complete || humanImage.naturalWidth === 0) {
-        await new Promise(resolve => humanImage.onload = resolve);
+    for (let i = 0; i < numStrands; i++) {
+        const x = startX + (i * strandSpacing);
+        scalpPoints.push({ x, y: scalpTop });
     }
     
-    if (!faceLandmarker) {
-        const filesetResolver = await FilesetResolver.forVisionTasks(
-            "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
-        );
-        faceLandmarker = await FaceLandmarker.createFromOptions(filesetResolver, {
-            baseOptions: {
-                modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
-                delegate: "GPU"
-            },
-            outputFaceBlendshapes: false,
-            runningMode: "IMAGE",
-            numFaces: 1
-        });
-    }
-
-    const results = faceLandmarker.detect(humanImage);
-
-    if (results.faceLandmarks && results.faceLandmarks.length > 0) {
-        const landmarks = results.faceLandmarks[0];
-        const containerRect = characterContainer.getBoundingClientRect();
-
-        // Map normalized landmark coordinates to the container's coordinate space
-        const scalpCoords = SCALP_LANDMARK_INDICES.map(i => ({
-            x: landmarks[i].x * containerRect.width,
-            y: landmarks[i].y * containerRect.height
-        }));
-
-        // Sort points from left to right to ensure hair is generated in order
-        scalpCoords.sort((a, b) => a.x - b.x);
-
-        return scalpCoords;
-    }
-    return null; // No face found
+    return scalpPoints;
 }
 
 
@@ -117,29 +89,22 @@ function setupPhysics(scalpPoints) {
 
 function createHair(scalpPoints) {
     if (hairComposite) {
-        World.remove(engine.world, hairComposite);
+        Composite.clear(hairComposite, false); // Clear existing hair
+    } else {
+        hairComposite = Composite.create();
+        World.add(engine.world, hairComposite);
+    }
+
+    if (!scalpPoints || scalpPoints.length === 0) {
+        console.error("Scalp points not available for hair creation.");
+        return;
     }
 
     const group = 1; // Bodies in the same group do not collide
     const hairSegments = 10;
     const segmentSize = 2;
     const hairColor = '#3a2411';
-
-    hairComposite = Composite.create();
     
-    if (!scalpPoints) {
-        console.error("Scalp points not available for hair creation.");
-        // Fallback to old method if detection fails
-        const scalpTop = renderer.options.height * 0.2;
-        const scalpWidth = renderer.options.width * 0.45;
-        const scalpX = renderer.options.width / 2;
-        const strandSpacing = renderer.options.width / 15;
-        scalpPoints = [];
-        for (let x = scalpX - scalpWidth / 2; x < scalpX + scalpWidth / 2; x += strandSpacing) {
-            scalpPoints.push({x: x, y: scalpTop});
-        }
-    }
-
     scalpPoints.forEach(point => {
         const strand = Composites.stack(point.x, point.y, 1, hairSegments, 0, 0, (x, y) => {
             return Bodies.circle(x, y, segmentSize, {
@@ -164,8 +129,6 @@ function createHair(scalpPoints) {
 
         Composite.add(hairComposite, [strand, pin]);
     });
-
-    World.add(engine.world, hairComposite);
 }
 
 
@@ -188,7 +151,7 @@ async function handleResize() {
     renderer.canvas.height = containerRect.height;
     
     // Re-detect scalp and recreate hair for the new size
-    const scalpPoints = await detectScalp();
+    const scalpPoints = getScalpPoints();
     createHair(scalpPoints);
     
     // Resume engine
@@ -197,22 +160,19 @@ async function handleResize() {
 
 
 // --- Initialization ---
-async function initializeApp() {
-    try {
-        const scalpPoints = await detectScalp();
-        if (scalpPoints) {
-            setupPhysics(scalpPoints);
-        } else {
-            console.error("Could not detect face landmarks. Using fallback hair placement.");
-            // Setup with fallback hair if detection fails
-            setupPhysics(null);
-        }
-    } catch (error) {
-        console.error("Initialization failed:", error);
-        // Fallback if Mediapipe fails to load or run
-        setupPhysics(null);
+function initializeApp() {
+    // Wait for the character image to load to ensure container has correct dimensions
+    if (!humanImage.complete) {
+        humanImage.onload = start;
+    } else {
+        start();
+    }
+
+    function start() {
+        const scalpPoints = getScalpPoints();
+        setupPhysics(scalpPoints);
     }
 }
 
-initializeApp();
+window.addEventListener('load', initializeApp);
 window.addEventListener('resize', handleResize);
