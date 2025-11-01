@@ -32,7 +32,7 @@ async function loadModels() {
     }
 }
 
-function getScalpPoints() {
+async function getScalpPoints() {
     const detections = await faceapi.detectSingleFace(humanImage, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks(true);
 
     const containerRect = characterContainer.getBoundingClientRect();
