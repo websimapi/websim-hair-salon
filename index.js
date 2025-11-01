@@ -23,8 +23,8 @@ let hairComposite;
 async function loadModels() {
     try {
         await Promise.all([
-            faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-            faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL)
+            faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL), // Use a more robust model
+            faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL) // Use the corresponding landmark model
         ]);
     } catch (error) {
         console.error("Error loading face-api models:", error);
@@ -33,7 +33,8 @@ async function loadModels() {
 }
 
 async function getScalpPoints() {
-    const detections = await faceapi.detectSingleFace(humanImage, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks(true);
+    // Using SsdMobilenetv1Options now
+    const detections = await faceapi.detectSingleFace(humanImage, new faceapi.SsdMobilenetv1Options()).withFaceLandmarks();
 
     const containerRect = characterContainer.getBoundingClientRect();
     const scalpPoints = [];
