@@ -1,13 +1,17 @@
 import Matter from 'matter-js';
+import * as faceapi from 'face-api.js';
 
 // --- Matter.js module aliases ---
 const { Engine, Render, Runner, World, Bodies, Composite, Composites, Constraint, Mouse, MouseConstraint } = Matter;
+
+const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 
 // --- DOM Elements ---
 const gameContainer = document.getElementById('game-container');
 const characterContainer = document.getElementById('character-container');
 const humanImage = document.getElementById('human');
 const canvas = document.getElementById('hair-canvas');
+const loadingOverlay = document.getElementById('loading-overlay');
 
 // --- Physics setup ---
 let engine;
@@ -16,23 +20,62 @@ let runner;
 let mouseConstraint;
 let hairComposite;
 
+async function loadModels() {
+    try {
+        await Promise.all([
+            faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
+            faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL)
+        ]);
+    } catch (error) {
+        console.error("Error loading face-api models:", error);
+        loadingOverlay.innerText = "Error loading AI models. Please refresh.";
+    }
+}
+
 function getScalpPoints() {
+    const detections = await faceapi.detectSingleFace(humanImage, new faceapi.TinyFaceDetectorOptions()).withFaceLandmarks(true);
+
     const containerRect = characterContainer.getBoundingClientRect();
     const scalpPoints = [];
 
-    // Define the scalp area based on percentages of the container, so it scales
-    const scalpTop = containerRect.height * 0.2; // 20% from the top
-    const scalpWidth = containerRect.width * 0.5; // 50% of the width
-    const startX = (containerRect.width - scalpWidth) / 2;
-    const endX = startX + scalpWidth;
-    const numStrands = 15;
-    const strandSpacing = scalpWidth / (numStrands - 1);
+    if (detections) {
+        console.log("Face detected!");
+        const box = detections.detection.box;
 
-    for (let i = 0; i < numStrands; i++) {
-        const x = startX + (i * strandSpacing);
-        scalpPoints.push({ x, y: scalpTop });
+        // Image has different dimensions than its display size, so we need to scale the detection box
+        const scaleX = containerRect.width / humanImage.naturalWidth;
+        const scaleY = containerRect.height / humanImage.naturalHeight;
+
+        // Use the top of the detected face box as the scalp line
+        // Add a small negative offset to place hair slightly inside the head outline
+        const scalpTop = box.top * scaleY - 5;
+        const scalpWidth = box.width * scaleX * 0.8; // Use 80% of the face width for hair
+        const startX = box.x * scaleX + (box.width * scaleX * 0.1); // Center the hair area
+        const endX = startX + scalpWidth;
+        const numStrands = 15;
+        const strandSpacing = scalpWidth / (numStrands - 1);
+
+        for (let i = 0; i < numStrands; i++) {
+            const x = startX + (i * strandSpacing);
+            scalpPoints.push({ x, y: scalpTop });
+        }
+
+    } else {
+        console.warn("No face detected. Falling back to percentage-based positioning.");
+        // Fallback for when face detection fails
+        const scalpTop = containerRect.height * 0.2; // 20% from the top
+        const scalpWidth = containerRect.width * 0.5; // 50% of the width
+        const startX = (containerRect.width - scalpWidth) / 2;
+        const endX = startX + scalpWidth;
+        const numStrands = 15;
+        const strandSpacing = scalpWidth / (numStrands - 1);
+
+        for (let i = 0; i < numStrands; i++) {
+            const x = startX + (i * strandSpacing);
+            scalpPoints.push({ x, y: scalpTop });
+        }
     }
-    
+
     return scalpPoints;
 }
 
@@ -151,7 +194,7 @@ async function handleResize() {
     renderer.canvas.height = containerRect.height;
     
     // Re-detect scalp and recreate hair for the new size
-    const scalpPoints = getScalpPoints();
+    const scalpPoints = await getScalpPoints();
     createHair(scalpPoints);
     
     // Resume engine
@@ -160,7 +203,10 @@ async function handleResize() {
 
 
 // --- Initialization ---
-function initializeApp() {
+async function initializeApp() {
+    await loadModels();
+    loadingOverlay.style.display = 'none';
+
     // Wait for the character image to load to ensure container has correct dimensions
     if (!humanImage.complete) {
         humanImage.onload = start;
@@ -168,8 +214,8 @@ function initializeApp() {
         start();
     }
 
-    function start() {
-        const scalpPoints = getScalpPoints();
+    async function start() {
+        const scalpPoints = await getScalpPoints();
         setupPhysics(scalpPoints);
     }
 }
