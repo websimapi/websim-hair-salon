@@ -2,7 +2,7 @@ import Matter from 'matter-js';
 import * as faceapi from 'face-api.js';
 
 // --- Matter.js module aliases ---
-const { Engine, Render, Runner, World, Bodies, Composite, Composites, Constraint, Mouse, MouseConstraint } = Matter;
+const { Engine, Render, Runner, World, Bodies, Composite, Composites, Constraint, Mouse, MouseConstraint, Events } = Matter;
 
 const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic/face-api/model/';
 
@@ -19,6 +19,7 @@ let renderer;
 let runner;
 let mouseConstraint;
 let hairComposite;
+let faceLandmarks; // To store the detected landmarks
 
 async function loadModels() {
     try {
@@ -35,6 +36,7 @@ async function loadModels() {
 async function getScalpPoints() {
     // Using SsdMobilenetv1Options now
     const detections = await faceapi.detectSingleFace(humanImage, new faceapi.SsdMobilenetv1Options()).withFaceLandmarks();
+    faceLandmarks = detections; // Store detections to be used for drawing
 
     const containerRect = characterContainer.getBoundingClientRect();
     const scalpPoints = [];
@@ -100,6 +102,22 @@ function setupPhysics(scalpPoints) {
             height: canvas.height,
             wireframes: false, // We want to see colored hair
             background: 'transparent'
+        }
+    });
+    
+    // Add drawing landmarks after each render frame
+    Events.on(renderer, 'afterRender', () => {
+        if (faceLandmarks) {
+            const displaySize = { width: renderer.canvas.width, height: renderer.canvas.height };
+            
+            // Resize the detected landmarks to match the canvas size for drawing
+            const resizedDetections = faceapi.resizeResults(faceLandmarks, displaySize);
+            
+            if (resizedDetections) {
+                // Use face-api's built-in drawing function to draw landmarks on the canvas
+                // This happens after Matter.js draws the hair, so it will be an overlay.
+                faceapi.draw.drawFaceLandmarks(renderer.canvas, resizedDetections);
+            }
         }
     });
     
@@ -194,7 +212,7 @@ async function handleResize() {
     renderer.canvas.width = containerRect.width;
     renderer.canvas.height = containerRect.height;
     
-    // Re-detect scalp and recreate hair for the new size
+    // Re-detect scalp (which updates landmarks) and recreate hair for the new size
     const scalpPoints = await getScalpPoints();
     createHair(scalpPoints);
     
